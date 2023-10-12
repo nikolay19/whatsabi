@@ -5,6 +5,49 @@ import { ABI, ABIFunction, ABIEvent, StateMutability } from "./abi";
 import { opcodes, OpCode, pushWidth, isPush, isLog, isHalt, isCompare } from "./opcodes";
 
 
+function isUint8ArrayASCII(uint8Array: Uint8Array): boolean {
+    for (const byte of uint8Array) {
+        if (byte < 32 || byte > 126) {
+            // ASCII characters are in the range [32, 126] (inclusive)
+            return false;
+        }
+    }
+    return true;
+}
+
+function cutEvent(uint8Array: Uint8Array): Uint8Array {
+    // Determine the number of elements to remove from the start
+    let startTrimCount = 0;
+    for (const byte of uint8Array) {
+        if (byte === 0 || byte === 255) {
+            startTrimCount++;
+        } else {
+            break; // Stop when a non-0 and non-255 byte is encountered
+        }
+    }
+
+    // Determine the number of elements to remove from the end
+    let endTrimCount = 0;
+    for (let i = uint8Array.length - 1; i >= 0; i--) {
+        if (uint8Array[i] === 0 || uint8Array[i] === 255) {
+            endTrimCount++;
+        } else {
+            break; // Stop when a non-0 and non-255 byte is encountered
+        }
+    }
+
+    // Check if the entire array consists of 0 or 255 bytes
+    if (startTrimCount + endTrimCount === uint8Array.length) {
+        return new Uint8Array(0); // Return an empty Uint8Array
+    }
+
+    // Create a new Uint8Array without the trimmed elements
+    const trimmedArray = uint8Array.subarray(startTrimCount, uint8Array.length - endTrimCount);
+
+    return trimmedArray;
+}
+
+
 function valueToOffset(value: Uint8Array): number {
     // FIXME: Should be a cleaner way to do this...
     return parseInt(hexlify(value), 16);
@@ -235,9 +278,14 @@ export function disasm(bytecode: string): Program {
         // Track last PUSH32 to find LOG topics
         // This is probably not bullet proof but seems like a good starting point
         if (inst === opcodes.PUSH32) {
+            if(isUint8ArrayASCII(cutEvent(code.value())) === null) {
+                console.log("SKIP ASCII "+hexlify(code.value()));
+                continue
+            }
             lastPush32 = code.value();
             continue
         } else if (isLog(inst) && lastPush32.length > 0) {
+            console.log("ADD EVENT DASM "+hexlify(lastPush32));
             p.eventCandidates.push(hexlify(lastPush32));
             continue
         }
